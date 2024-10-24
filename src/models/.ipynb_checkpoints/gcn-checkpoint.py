@@ -4,6 +4,11 @@ import torch.nn.functional as F
 from torch_geometric.datasets import Planetoid
 from torch_geometric.nn import GCNConv
 from tqdm.auto import tqdm, trange
+from copy import deepcopy
+
+import sys
+sys.path.append('../')
+from utils.datasets import *
 
 class GCN(nn.Module):
     def __init__(self, in_feats, h_feats, num_classes):
@@ -19,15 +24,21 @@ class GCN(nn.Module):
         h = self.conv2(h, edge_index)
         return h
 
-    def train_model(self, data):
+    def train_model(self, data, differentiable=False):
         self.train()
         logits = self(data.cuda())
         loss = F.cross_entropy(logits[data.train_mask], data.y[data.train_mask]) 
 
         self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step() 
-
+        if differentiable:
+            grads = torch.autograd.grad(loss, self.parameters(), create_graph=True)
+            for param, grad in zip(self.parameters(), grads):
+                param.grad = grad
+        else:
+            loss.backward()
+    
+        self.optimizer.step()
+    
         return loss.item()
 
     def test(self, data):
@@ -38,7 +49,7 @@ class GCN(nn.Module):
         acc = (pred[data.test_mask] == data.y[data.test_mask]).sum().item() / data.test_mask.sum().item()
         return acc
 
-    def fit(self, data, epochs=200):
+    def fit(self, data, epochs=200, **kwargs):
         for epoch in tqdm(range(epochs), desc="Training Epochs"):
-            loss = self.train_model(data)
+            loss = self.train_model(data, **kwargs)
             acc = self.test(data)
