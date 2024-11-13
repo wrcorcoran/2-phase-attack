@@ -1,55 +1,69 @@
-import torch
 import torch.nn as nn
+import torch
 import torch.nn.functional as F
-from torch_geometric.datasets import Planetoid
-from torch_geometric.nn import GCNConv
-from tqdm.auto import tqdm, trange
-from copy import deepcopy
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
+from torch_geometric.nn.dense.linear import Linear
+from torch_geometric.nn.inits import zeros
+from torch_geometric.typing import Adj, OptTensor
+from torch_geometric.utils import add_self_loops, degree
+from torch_sparse import SparseTensor, fill_diag
+from torch_geometric.utils import add_self_loops
+from torch_geometric.nn import MessagePassing
 
-import sys
-sys.path.append('../')
-from utils.datasets import *
+class GCNConv(MessagePassing):
+    def __init__(self, in_channels, out_channels, self_loops=True):
+        super().__init__()
+        self.self_loops = self_loops
+
+        self.lin = Linear(in_channels, out_channels, bias=False, weight_initializer='glorot')
+        self.bias = nn.Parameter(torch.Tensor(out_channels))
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.lin.reset_parameters()
+        zeros(self.bias)
+
+    def forward(self, x, edge_index):
+        x = self.lin(x)
+
+        if self.self_loops:
+            edge_index, _ = add_self_loops(edge_index, num_nodes=None)
+
+        row, col = edge_index
+        deg = degree(col, x.size(0), dtype=x.dtype)
+        deg_inv_sqrt = deg.pow(-0.5)
+        deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+        norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+        
+        out = self.propagate(edge_index, x=x, norm=norm)
+
+        out += self.bias
+
+        return out
 
 class GCN(nn.Module):
-    def __init__(self, in_feats, h_feats, num_classes):
-        super(GCN, self).__init__()
-        self.conv1 = GCNConv(in_feats, h_feats)
-        self.conv2 = GCNConv(h_feats, num_classes)
-        self.optimizer = torch.optim.Adam(self.parameters(), lr=0.01)
+    def __init__(self, in_channels, out_channels, hidden_dims = [16], dropout = 0.5):
+        super().__init__()
+        conv = []
 
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        h = self.conv1(x, edge_index)
-        h = F.relu(h)
-        h = self.conv2(h, edge_index)
-        return h
+        for dim in hidden_dims:
+            conv.append(GCNConv(in_channels, dim))
+            conv.append(nn.ReLU())
+            conv.append(nn.Dropout(dropout))
+            in_channels = dim
+        conv.append(GCNConv(in_channels, out_channels))
+        self.conv = nn.ModuleList(conv)
+        
+    def forward(self, x, edge_index):
+        for layer in self.conv:
+            if isinstance(layer, GCNConv):
+                x = layer(x, edge_index)
+            else:
+                x = layer(x)
+        return x
 
-    def train_model(self, data, differentiable=False):
-        self.train()
-        logits = self(data.cuda())
-        loss = F.cross_entropy(logits[data.train_mask], data.y[data.train_mask]) 
-
-        self.optimizer.zero_grad()
-        if differentiable:
-            grads = torch.autograd.grad(loss, self.parameters(), create_graph=True)
-            for param, grad in zip(self.parameters(), grads):
-                param.grad = grad
-        else:
-            loss.backward()
-    
-        self.optimizer.step()
-    
-        return loss.item()
-
-    def test(self, data):
-        self.eval()
-        out = self(data.cuda())
-        pred = out.argmax(dim=1)
-    
-        acc = (pred[data.test_mask] == data.y[data.test_mask]).sum().item() / data.test_mask.sum().item()
-        return acc
-
-    def fit(self, data, epochs=200, **kwargs):
-        for epoch in tqdm(range(epochs), desc="Training Epochs"):
-            loss = self.train_model(data, **kwargs)
-            acc = self.test(data)
+    def reset_parameters(self):
+        for layer in self.conv:
+            if isinstance(layer, GCNConv):
+                layer.reset_parameters()
