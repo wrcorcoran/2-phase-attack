@@ -1,4 +1,4 @@
-from gcn import *
+from .gcn import *
 
 class Trainable:
     def __init__(self, model):
