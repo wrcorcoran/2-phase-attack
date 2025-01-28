@@ -234,13 +234,14 @@ class Metattack(torch.nn.Module):
                 if feature_attack:
                     feat_grad_score = self.feature_score(
                         modified_feat, feat_grad)
-
+                    
                 adj_max, adj_argmax = torch.max(adj_grad_score, dim=0)
                 feat_max, feat_argmax = torch.max(feat_grad_score, dim=0)
-
+                
                 if adj_max >= feat_max:
                     u, v = divmod(adj_argmax.item(), num_nodes)
                     edge_weight = modified_adj[u, v].data.item()
+                    # print("max weight:", edge_weight)
                     adj_changes[u, v].data.fill_(1 - 2 * edge_weight)
                     adj_changes[v, u].data.fill_(1 - 2 * edge_weight)
 
@@ -285,12 +286,18 @@ class Metattack(torch.nn.Module):
         return adj
 
     def add_edge(self, u, v, it = None):
-        self._added_edges[(u, v)] = it
+        if u < v:
+            self._added_edges[(u, v)] = it
+        else:
+            self._added_edges[(v, u)] = it
         self.degree[u] += 1
         self.degree[v] += 1
 
     def remove_edge(self, u, v, it = None):
-        self._removed_edges[(u, v)] = it
+        if u < v:
+            self._removed_edges[(u, v)] = it
+        else:
+            self._removed_edges[(v, u)] = it
         self.degree[u] -= 1
         self.degree[v] -= 1
     
