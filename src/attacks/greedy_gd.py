@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
 from torch import Tensor
 from torch.autograd import grad
 from torch.nn import init
@@ -8,6 +9,16 @@ import scipy.sparse as sp
 from torch_geometric.utils import degree, to_scipy_sparse_matrix
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 import copy
+from torch_geometric.utils import dense_to_sparse
+
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import attack_utils as util
+
+# torch.use_deterministic_algorithms(True)
 
 class Metattack(torch.nn.Module):
     r"""Implementation of `Metattack` attack from the:
@@ -140,7 +151,8 @@ class Metattack(torch.nn.Module):
         clipped_matrix = torch.clamp(matrix, -1., 1.)
         return clipped_matrix
 
-    def reset_parameters(self):
+    def reset_parameters(self, seed=42):
+        torch.manual_seed(seed)
         for w, wv in zip(self.weights, self.w_velocities):
             init.xavier_uniform_(w)
             init.zeros_(wv)
@@ -149,6 +161,21 @@ class Metattack(torch.nn.Module):
             self.weights[i] = self.weights[i].detach().requires_grad_()
             self.w_velocities[i] = self.w_velocities[i].detach()
 
+    def filter_potential_singletons(self, modified_adj, degree):
+        modified_degree = degree + modified_adj.sum(1)
+        mask = (modified_degree > 0).float()
+        return mask.view(-1, 1) * mask.view(1, -1)
+
+
+    def log_likelihood_constraint(self, modified_adj, ori_adj, ll_cutoff):
+        t_d_min = torch.tensor(2.0).to(self.device)
+        t_possible_edges = np.array(np.triu(np.ones((self.num_nodes, self.num_nodes)), k=1).nonzero()).T
+        allowed_mask, current_ratio = util.likelihood_ratio_filter(t_possible_edges,
+                                                                    modified_adj,
+                                                                    ori_adj, t_d_min,
+                                                                    ll_cutoff)
+        return allowed_mask, current_ratio
+        
     def forward(self, adj, x):
         """"""
         h = x
@@ -189,7 +216,7 @@ class Metattack(torch.nn.Module):
         return adj
 
     def attack(self, num_budgets=0.05, *, structure_attack=True,
-               feature_attack=False, disable=False):
+               feature_attack=False, disable=False, ll_cutoff=0.004):
 
         self.num_budgets = int((self.num_edges // 2) * num_budgets)
         self.structure_attack = structure_attack
@@ -234,6 +261,15 @@ class Metattack(torch.nn.Module):
                 if feature_attack:
                     feat_grad_score = self.feature_score(
                         modified_feat, feat_grad)
+
+                #Remove edges that violate constraints
+                singleton_mask = self.filter_potential_singletons(modified_adj, self.degree)
+
+                #This returns a tuple so take the first index and put it on the right device
+                ll_mask = self.log_likelihood_constraint(modified_adj, self.adj, ll_cutoff)[0].to(self.device)
+                
+                adj_grad_score *= singleton_mask.view(-1)
+                adj_grad_score *= ll_mask.view(-1)
 
                 adj_max, adj_argmax = torch.max(adj_grad_score, dim=0)
                 feat_max, feat_argmax = torch.max(feat_grad_score, dim=0)
@@ -335,21 +371,36 @@ class Metattack(torch.nn.Module):
         if self.feature_attack:
             return None, grad(loss, self.feat_changes)[0]
 
+# def handle_new_edges(data, attacker, device):
+#     added, removed = list(attacker._added_edges.keys()), list(attacker._removed_edges.keys())
+#     new_data = copy.deepcopy(data)
+#     for u, v in added:
+#         edge1 = torch.tensor([[u], [v]]).to(device)
+#         edge2 = torch.tensor([[v], [u]]).to(device)
+#         new_data.edge_index = torch.cat([new_data.edge_index, edge1], dim=1)
+#         new_data.edge_index = torch.cat([new_data.edge_index, edge2], dim=1)
+
+#     print(new_data.edge_index.shape)
+
+#     for u, v in removed:
+#         edge_to_delete = torch.tensor([[u, v], [v, u]]).to(device)
+#         mask = ~((new_data.edge_index == edge_to_delete[:, 0:1]).all(dim=0) | 
+#          (new_data.edge_index == edge_to_delete[:, 1:2]).all(dim=0))
+#         new_data.edge_index = new_data.edge_index[:, mask]
+
+#     return new_data
+
 def handle_new_edges(data, attacker, device):
-    added, removed = list(attacker._added_edges.keys()), list(attacker._removed_edges.keys())
+
+    modified_adj = attacker.get_perturbed_adj(attacker.adj_changes).to(device)
+
+    # Convert the dense adjacency matrix to edge_index format
+    edge_index, edge_weight = dense_to_sparse(modified_adj)
+
     new_data = copy.deepcopy(data)
-    for u, v in added:
-        edge1 = torch.tensor([[u], [v]]).to(device)
-        edge2 = torch.tensor([[v], [u]]).to(device)
-        new_data.edge_index = torch.cat([new_data.edge_index, edge1], dim=1)
-        new_data.edge_index = torch.cat([new_data.edge_index, edge2], dim=1)
+    new_data.edge_index = edge_index
+    new_data.edge_weight = edge_weight
 
-    print(new_data.edge_index.shape)
-
-    for u, v in removed:
-        edge_to_delete = torch.tensor([[u, v], [v, u]]).to(device)
-        mask = ~((new_data.edge_index == edge_to_delete[:, 0:1]).all(dim=0) | 
-         (new_data.edge_index == edge_to_delete[:, 1:2]).all(dim=0))
-        new_data.edge_index = new_data.edge_index[:, mask]
+    print(f"Updated edge index: {new_data.edge_index.shape}")
 
     return new_data
