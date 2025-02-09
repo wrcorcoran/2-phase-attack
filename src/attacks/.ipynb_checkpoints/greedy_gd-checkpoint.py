@@ -104,14 +104,16 @@ class Metattack(torch.nn.Module):
         weights = []
         w_velocities = []
 
+        prev_shape = None
         for para in self.surrogate.parameters():
             if para.ndim == 2:
                 para = para.t()
-                weights.append(torch.zeros_like(para, requires_grad=True))
-                w_velocities.append(torch.zeros_like(para))
-
+                if prev_shape is None or para.shape[0] == prev_shape[1]:
+                    weights.append(torch.zeros_like(para, requires_grad=True))
+                    w_velocities.append(torch.zeros_like(para))
+                    prev_shape = para.shape
+        
         self.weights, self.w_velocities = weights, w_velocities
-
         self.epochs = epochs
         self.lr = lr
         self.momentum = momentum
@@ -180,8 +182,12 @@ class Metattack(torch.nn.Module):
         """"""
         h = x
         for w in self.weights[:-1]:
+            # print(adj.shape, h.shape, w.shape)
             h = adj @ (h @ w)
+            # print(h.shape)
             h = h.relu()
+            # print(h.shape)
+            # break # only appeases graphsage, shouldn't change other two
 
         return adj @ (h @ self.weights[-1])
 
@@ -191,7 +197,7 @@ class Metattack(torch.nn.Module):
         for _ in range(self.epochs):
             out = self(adj, feat)
             loss = F.cross_entropy(out[self.labeled_nodes], self.y_train)
-            grads = torch.autograd.grad(loss, self.weights, create_graph=True)
+            grads = torch.autograd.grad(loss, self.weights, create_graph=True, allow_unused=True)
 
             self.w_velocities = [
                 self.momentum * v + g for v, g in zip(self.w_velocities, grads)
@@ -284,14 +290,14 @@ class Metattack(torch.nn.Module):
                         self.remove_edge(u, v, it)
                     else:
                         self.add_edge(u, v, it)
-                else:
-                    u, v = divmod(feat_argmax.item(), num_feats)
-                    feat_weight = modified_feat[u, v].data.item()
-                    feat_changes[u, v].data.fill_(1 - 2 * feat_weight)
-                    if feat_weight > 0:
-                        self.remove_feat(u, v, it)
-                    else:
-                        self.add_feat(u, v, it)
+                # else:
+                #     u, v = divmod(feat_argmax.item(), num_feats)
+                #     feat_weight = modified_feat[u, v].data.item()
+                #     feat_changes[u, v].data.fill_(1 - 2 * feat_weight)
+                #     if feat_weight > 0:
+                #         self.remove_feat(u, v, it)
+                #     else:
+                #         self.add_feat(u, v, it)
 
         return self
 

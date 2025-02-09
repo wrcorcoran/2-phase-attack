@@ -45,15 +45,23 @@ class GCNConv(MessagePassing):
 class GCN(nn.Module):
     def __init__(self, in_channels, out_channels, hidden_dims = [16], dropout = 0.5):
         super().__init__()
-        conv = []
+        layers = []
 
+        # for dim in hidden_dims:
+        #     conv.append(GCNConv(in_channels, dim))
+        #     conv.append(nn.ReLU())
+        #     conv.append(nn.Dropout(dropout))
+        #     in_channels = dim
+        # conv.append(GCNConv(in_channels, out_channels))
+        # self.conv = nn.ModuleList(conv)
         for dim in hidden_dims:
-            conv.append(GCNConv(in_channels, dim))
-            conv.append(nn.ReLU())
-            conv.append(nn.Dropout(dropout))
+            layers.append(GCNConv(in_channels, dim))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
             in_channels = dim
-        conv.append(GCNConv(in_channels, out_channels))
-        self.conv = nn.ModuleList(conv)
+        
+        layers.append(GCNConv(in_channels, out_channels))
+        self.conv = nn.Sequential(*layers)
         
     def forward(self, x, edge_index):
         for layer in self.conv:

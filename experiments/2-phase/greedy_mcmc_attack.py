@@ -14,7 +14,6 @@ from torch_geometric.utils import dense_to_sparse, from_networkx, to_networkx
 sys.path.append("../../")
 
 from src.attacks.greedy_gd import *
-from src.models.gcn import *
 from src.models.trainable import *
 from src.utils.datasets import *
 
@@ -442,14 +441,17 @@ def two_phase_attack_mcmc(
 
 
 def load_model_and_edges(
-    model_save_path, list_save_path, shape, classes, layers, device
+    model_save_path, list_save_path, model, device
 ):
     loaded_model_state_dict = torch.load(model_save_path)
 
-    model = GCN(shape, classes, layers).to(device)
+    model = model.to(device)
     model.load_state_dict(loaded_model_state_dict)
 
-    edges_to_add = torch.load(list_save_path)
+    if list_save_path != None:
+        edges_to_add = torch.load(list_save_path)
+    else:
+        edges_to_add = None
 
     train = Trainable(model)
 
@@ -487,7 +489,7 @@ def collect_edges(model, data, device):
     # run 5 metattacks w/ ptb of 1
     amts = defaultdict(int)
 
-    for _ in range(10):
+    for _ in range(1):
         attacker = Metattack(data, device=device)
         attacker.setup_surrogate(
             model,
@@ -496,12 +498,15 @@ def collect_edges(model, data, device):
             lambda_=0.0,
         )
         attacker.reset()
-        attacker.attack(0.1)
+        attacker.attack(1)
 
-        for edge in attacker._added_edges.keys():
-            amts[edge] += 1
+        for edge, itr in attacker._added_edges.items():
+            amts[edge] = itr
 
-    sorted_list = sorted(amts.items(), key=lambda item: item[1], reverse=True)
+        for edge, itr in attacker._removed_edges.items():
+            amts[edge] = itr
+
+    sorted_list = sorted(amts.items(), key=lambda item: item[1], reverse=False)
     sorted_keys = [key for key, value in sorted_list]
 
     return sorted_keys

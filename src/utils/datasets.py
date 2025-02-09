@@ -1,4 +1,6 @@
 from torch_geometric.datasets import Planetoid
+from torch_geometric.datasets import CitationFull
+from torch_geometric.datasets import AttributedGraphDataset
 import torch
 
 def get_cora(device):
