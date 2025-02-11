@@ -43,7 +43,7 @@ class Metattack(torch.nn.Module):
 
     # Metattack can also conduct feature attack
     _allow_feature_attack: bool = True
-    def __init__(self, data, device):
+    def __init__(self, data, device, seed=42):
         super().__init__()
         self.data = data
         self.num_budgets = None
@@ -68,6 +68,7 @@ class Metattack(torch.nn.Module):
         self.feat = self.ori_data.x
         self.edge_index = self.ori_data.edge_index
         self.edge_weight = self.ori_data.edge_weight
+        self.seed = seed
 
     def setup_surrogate(self, surrogate: torch.nn.Module,
                         labeled_nodes: Tensor, unlabeled_nodes: Tensor,
@@ -153,8 +154,8 @@ class Metattack(torch.nn.Module):
         clipped_matrix = torch.clamp(matrix, -1., 1.)
         return clipped_matrix
 
-    def reset_parameters(self, seed=42):
-        torch.manual_seed(seed)
+    def reset_parameters(self):
+        torch.manual_seed(self.seed)
         for w, wv in zip(self.weights, self.w_velocities):
             init.xavier_uniform_(w)
             init.zeros_(wv)

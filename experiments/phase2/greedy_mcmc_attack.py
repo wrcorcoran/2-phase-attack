@@ -267,28 +267,47 @@ def two_phase_attack_mcmc(
     modified_data.train_mask = data.train_mask
     modified_data.test_mask = data.test_mask
 
-    if not is_reversed and split > 0:
-        attacker_dirty = Metattack(modified_data, device=device)
-        attacker_dirty.setup_surrogate(
-            model,
-            labeled_nodes=data.train_mask,
-            unlabeled_nodes=data.test_mask,
-            lambda_=0.0,
-        )
-        attacker_dirty.reset()
-        attacker_dirty.attack(second_phase_percent)
+    # if not is_reversed and split > 0:
+    #     attacker_dirty = Metattack(modified_data, device=device)
+    #     attacker_dirty.setup_surrogate(
+    #         model,
+    #         labeled_nodes=data.train_mask,
+    #         unlabeled_nodes=data.test_mask,
+    #         lambda_=0.0,
+    #     )
+    #     attacker_dirty.reset()
+    #     attacker_dirty.attack(second_phase_percent)
 
-    degs_dirty = defaultdict(tuple)
+    # degs_dirty = defaultdict(tuple)
 
-    for k, v in attacker_dirty._added_edges.items():
-        degs_dirty[v] = (k, True)
+    # for k, v in attacker_dirty._added_edges.items():
+    #     degs_dirty[v] = (k, True)
 
-    for k, v in attacker_dirty._removed_edges.items():
-        degs_dirty[v] = (k, False)
+    # for k, v in attacker_dirty._removed_edges.items():
+    #     degs_dirty[v] = (k, False)
 
-    itr_list = list(degs_dirty.items())[::-1] if is_reversed else degs_dirty.items()
+    # itr_list = list(degs_dirty.items())[::-1] if is_reversed else degs_dirty.items()
 
-    for _, second in itr_list:
+    # for _, second in itr_list:
+    attacker = Metattack(modified_data, device=device)
+    attacker.setup_surrogate(
+        model,
+        labeled_nodes=data.train_mask,
+        unlabeled_nodes=data.test_mask,
+        lambda_=0.0,
+    )
+    attacker.reset()
+    attacker.attack(second_phase_percent)
+
+    degs = defaultdict(tuple)
+
+    for k, v in attacker._added_edges.items():
+        degs[v] = (k, True)
+
+    for k, v in attacker._removed_edges.items():
+        degs[v] = (k, False)
+
+    for _, second in degs.items():
         u, v = second[0]
         try:
             if second[1]:
@@ -667,6 +686,7 @@ def two_phase_attack_greedy(
             # print(modified_accuracy, i)
             i += 1
             # accuracies.append(modified_accuracy)
+            dirty_prev_loss = dirty_loss
             losses.append(modified_loss)
             accuracies.append(modified_accuracy)
         else:
@@ -689,28 +709,47 @@ def two_phase_attack_greedy(
     modified_data.train_mask = data.train_mask
     modified_data.test_mask = data.test_mask
 
-    if not is_reversed and split > 0:
-        attacker_dirty = Metattack(modified_data, device=device)
-        attacker_dirty.setup_surrogate(
-            model,
-            labeled_nodes=data.train_mask,
-            unlabeled_nodes=data.test_mask,
-            lambda_=0.0,
-        )
-        attacker_dirty.reset()
-        attacker_dirty.attack(second_phase_percent)
+    # if not is_reversed and split > 0:
+    #     attacker_dirty = Metattack(modified_data, device=device)
+    #     attacker_dirty.setup_surrogate(
+    #         model,
+    #         labeled_nodes=data.train_mask,
+    #         unlabeled_nodes=data.test_mask,
+    #         lambda_=0.0,
+    #     )
+    #     attacker_dirty.reset()
+    #     attacker_dirty.attack(second_phase_percent)
+
+    # degs = defaultdict(tuple)
+
+    # for k, v in attacker_dirty._added_edges.items():
+    #     degs[v] = (k, True)
+
+    # for k, v in attacker_dirty._removed_edges.items():
+    #     degs[v] = (k, False)
+
+    # itr_list = list(degs_dirty.items())[::-1] if is_reversed else degs_dirty.items()
+
+    # for _, second in itr_list:
+    attacker = Metattack(modified_data, device=device)
+    attacker.setup_surrogate(
+        model,
+        labeled_nodes=data.train_mask,
+        unlabeled_nodes=data.test_mask,
+        lambda_=0.0,
+    )
+    attacker.reset()
+    attacker.attack(second_phase_percent)
 
     degs = defaultdict(tuple)
 
-    for k, v in attacker_dirty._added_edges.items():
+    for k, v in attacker._added_edges.items():
         degs[v] = (k, True)
 
-    for k, v in attacker_dirty._removed_edges.items():
+    for k, v in attacker._removed_edges.items():
         degs[v] = (k, False)
 
-    itr_list = list(degs_dirty.items())[::-1] if is_reversed else degs_dirty.items()
-
-    for _, second in itr_list:
+    for _, second in degs.items():
         u, v = second[0]
         try:
             if second[1]:
