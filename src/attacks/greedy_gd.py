@@ -331,11 +331,15 @@ class Metattack(torch.nn.Module):
         self._added_edges[(u, v)] = it
         self.degree[u] += 1
         self.degree[v] += 1
+        self.adj_changes[u, v] += 1
+        self.adj_changes[v, u] += 1
 
     def remove_edge(self, u, v, it = None):
         self._removed_edges[(u, v)] = it
         self.degree[u] -= 1
         self.degree[v] -= 1
+        self.adj_changes[u, v] -= 1
+        self.adj_changes[v, u] -= 1
     
     def structure_score(self, modified_adj, adj_grad):
         score = adj_grad * (1 - 2 * modified_adj)
