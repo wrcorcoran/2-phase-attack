@@ -233,6 +233,7 @@ class Metattack(BaseMeta):
             modified_adj = adj_changes_symm + ori_adj
 
             adj_norm = utils.normalize_adj_tensor(modified_adj)
+            #adj_norm = utils.normalize_adj_tensor(modified_adj.cpu()).to(device)
             self.inner_train(features, adj_norm, idx_train, idx_unlabeled, labels)
             adj_grad = self.get_meta_grad(features, adj_norm, idx_train, idx_unlabeled, labels, labels_self_training)
 

@@ -141,6 +141,7 @@ def normalize_adj_tensor(adj, sparse=False):
         adj = to_scipy(adj)
         mx = normalize_adj(adj.tolil())
         return sparse_mx_to_torch_sparse_tensor(mx).cuda()
+        
     else:
         mx = adj + torch.eye(adj.shape[0]).cuda()
         rowsum = mx.sum(1)
