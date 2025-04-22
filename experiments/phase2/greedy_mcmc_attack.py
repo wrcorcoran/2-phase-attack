@@ -32,8 +32,10 @@ def constant_fn(delta, initial_loss, i, first_phase_edges):
     return abs(delta) < (initial_loss / 100)
 
 
-def increasing_fn(delta, initial_loss, i, first_phase_edges):
+def increasing_fn(delta, initial_loss, i, first_phase_edges, total_change=None):
     # print(abs(delta), (((i + first_phase_edges) * initial_loss) / (first_phase_edges * 100)), abs(delta) < (((i + 1) * initial_loss) / (first_phase_edges * 100)))
+    if total_change != None:
+        return abs(delta) < (((i + 1) * initial_loss) / (first_phase_edges * 100))    
     return abs(delta) < (((i + 1) * initial_loss) / (first_phase_edges * 100))
 
 
