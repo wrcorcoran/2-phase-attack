@@ -5,7 +5,7 @@ import sys
 from sklearn.model_selection import train_test_split
 import torch.sparse as ts
 
-def likelihood_ratio_filter(node_pairs, modified_adjacency, original_adjacency, d_min, threshold=0.004):
+def likelihood_ratio_filter(node_pairs, modified_adjacency, original_adjacency, d_min, threshold=0.004, undirected=True):
     """
     Filter the input node pairs based on the likelihood ratio test proposed by Zügner et al. 2018, see
     https://dl.acm.org/citation.cfm?id=3220078. In essence, for each node pair return 1 if adding/removing the edge
@@ -55,7 +55,8 @@ def likelihood_ratio_filter(node_pairs, modified_adjacency, original_adjacency, 
     allowed_mask[filtered_edges.T] = 1
 
     #The clone was added to ensure it didnt throw an error when adding
-    allowed_mask += allowed_mask.clone().t()
+    if undirected:
+        allowed_mask += allowed_mask.clone().t()
     return allowed_mask, current_ratio
 
 

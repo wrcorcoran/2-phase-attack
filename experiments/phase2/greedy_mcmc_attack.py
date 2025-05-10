@@ -13,7 +13,7 @@ from torch_geometric.utils import dense_to_sparse, from_networkx, to_networkx
 
 sys.path.append("../../")
 
-from src.attacks.greedy_gd import *
+from src.attacks.greedy_gd_fixed import *
 from src.models.trainable import *
 from src.utils.datasets import *
 
@@ -109,8 +109,10 @@ def two_phase_attack_mcmc(
     first_phase_edges = int(budget * split)
     second_phase_percent = ptb_rate * (1 - split) * 1 / 2
     accuracies, losses = [initial_accuracy], [initial_loss]
-    G = to_networkx(data, to_undirected=True)
-    G_dirty = to_networkx(data, to_undirected=True)
+    # G = to_networkx(data, to_undirected=True)
+    # G_dirty = to_networkx(data, to_undirected=True)
+    G = copy.copy(data)
+    G_dirty = copy.copy(data)
 
     i, j = 0, 0  # i - number added, j - attempts
 
@@ -118,7 +120,8 @@ def two_phase_attack_mcmc(
     # store those edges in a dirty matrix
     # calculate loss + accuracy of dirty matrix
 
-    dirty_data = from_networkx(G_dirty).to(device)
+    # dirty_data = from_networkx(G_dirty).to(device)
+    dirty_data = G_dirty
     dirty_data.x = dirty_data_copy.x
     dirty_data.y = dirty_data_copy.y
     dirty_data.train_mask = dirty_data_copy.train_mask
@@ -141,22 +144,26 @@ def two_phase_attack_mcmc(
 
     for k, v in attacker_dirty._removed_edges.items():
         degs_dirty[v] = (k, False)
-
+    
     for _, second in degs_dirty.items():
         u, v = second[0]
         try:
             if second[1]:
-                G_dirty.add_edge(u, v)
+                # G_dirty.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                dirty_data.edge_index = torch.cat([dirty_data.edge_index, new_edges], dim=1)
             else:
-                G_dirty.remove_edge(u, v)
+                # G_dirty.remove_edge(u, v)
+                mask = ~(((dirty_data.edge_index[0] == u) & (dirty_data.edge_index[1] == v)) | ((dirty_data.edge_index[0] == v) & (dirty_data.edge_index[1] == u)))
+                dirty_data.edge_index = dirty_data.edge_index[:, mask]
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-    dirty_data = from_networkx(G_dirty).to(device)
-    dirty_data.x = dirty_data_copy.x
-    dirty_data.y = dirty_data_copy.y
-    dirty_data.train_mask = dirty_data_copy.train_mask
-    dirty_data.test_mask = dirty_data_copy.test_mask
+    # dirty_data = from_networkx(G_dirty).to(device)
+    # dirty_data.x = dirty_data_copy.x
+    # dirty_data.y = dirty_data_copy.y
+    # dirty_data.train_mask = dirty_data_copy.train_mask
+    # dirty_data.test_mask = dirty_data_copy.test_mask
 
     initial_dirty_loss, initial_dirty_accuracy = train.test(dirty_data)
 
@@ -175,23 +182,31 @@ def two_phase_attack_mcmc(
         if (u, v) in degs_set:
             continue
 
-        hasEdge = G.has_edge(u, v)
+        # hasEdge = G.has_edge(u, v)
+        hasEdge = (((G.edge_index[0] == u) & (G.edge_index[1] == v)) |
+          ((G.edge_index[0] == v) & (G.edge_index[1] == u))).any()
         # u, v = edges_to_add[j]
 
         # clean matrix
         try:
             if hasEdge:
-                G.remove_edge(u, v)
+                # G.remove_edge(u, v)
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]
             else:
-                G.add_edge(u, v)
+                # G.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-        modified_data = from_networkx(G).to(device)
-        modified_data.x = data.x
-        modified_data.y = data.y
-        modified_data.train_mask = data.train_mask
-        modified_data.test_mask = data.test_mask
+        # modified_data = from_networkx(G).to(device)
+        modified_data = copy.copy(G)
+        
+        # modified_data.x = data.x
+        # modified_data.y = data.y
+        # modified_data.train_mask = data.train_mask
+        # modified_data.test_mask = data.test_mask
 
         modified_loss, modified_accuracy = train.test(modified_data)
         delta = modified_loss - initial_loss
@@ -199,17 +214,23 @@ def two_phase_attack_mcmc(
         # dirty matrix
         try:
             if hasEdge:
-                G_dirty.remove_edge(u, v)
+                # G_dirty.remove_edge(u, v)
+                mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                G_dirty.edge_index = G_dirty.edge_index[:, mask]
             else:
-                G_dirty.add_edge(u, v)
+                # G_dirty.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-        dirty_data = from_networkx(G_dirty).to(device)
-        dirty_data.x = dirty_data_copy.x
-        dirty_data.y = dirty_data_copy.y
-        dirty_data.train_mask = dirty_data_copy.train_mask
-        dirty_data.test_mask = dirty_data_copy.test_mask
+        # dirty_data = from_networkx(G_dirty).to(device)
+        # dirty_data.x = dirty_data_copy.x
+        # dirty_data.y = dirty_data_copy.y
+        # dirty_data.train_mask = dirty_data_copy.train_mask
+        # dirty_data.test_mask = dirty_data_copy.test_mask
+
+        dirty_data = copy.copy(G_dirty)
 
         dirty_loss, dirty_accuracy = train.test(dirty_data)
         dirty_delta = dirty_loss - dirty_prev_loss
@@ -235,11 +256,23 @@ def two_phase_attack_mcmc(
         ):
             try:
                 if hasEdge:
-                    G.add_edge(u, v)
-                    G_dirty.add_edge(u, v)
+                    # G.add_edge(u, v)
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+                    
+                    # G_dirty.add_edge(u, v)
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
+                    
                 else:
-                    G.remove_edge(u, v)
-                    G_dirty.remove_edge(u, v)
+                    # G.remove_edge(u, v)
+                    mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                    G.edge_index = G.edge_index[:, mask]  
+                    
+                    # G_dirty.remove_edge(u, v)
+                    mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                    G_dirty.edge_index = G_dirty.edge_index[:, mask]
+                    
             except Exception as e:
                 print(f"Error modifying edge ({u}, {v}): {e}")
             continue
@@ -255,20 +288,33 @@ def two_phase_attack_mcmc(
                 # print("removing edge")
                 try:
                     if hasEdge:
-                        G.add_edge(u, v)
-                        G_dirty.add_edge(u, v)
+                        # G.add_edge(u, v)
+                        # G_dirty.add_edge(u, v)
+                        new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                        G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+                        
+                        new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                        G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
                     else:
-                        G.remove_edge(u, v)
-                        G_dirty.remove_edge(u, v)
+                        # G.remove_edge(u, v)
+                        # G_dirty.remove_edge(u, v)
+                        mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                        G.edge_index = G.edge_index[:, mask]  
+                        
+                        # G_dirty.remove_edge(u, v)
+                        mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                        G_dirty.edge_index = G_dirty.edge_index[:, mask]
                 except Exception as e:
                     print(f"Error modifying edge ({u}, {v}): {e}")
 
-    modified_data = from_networkx(G).to(device)
-    modified_data.x = data.x
-    modified_data.y = data.y
-    modified_data.train_mask = data.train_mask
-    modified_data.test_mask = data.test_mask
+    # modified_data = from_networkx(G).to(device)
+    # modified_data.x = data.x
+    # modified_data.y = data.y
+    # modified_data.train_mask = data.train_mask
+    # modified_data.test_mask = data.test_mask
 
+    modified_data = copy.copy(G)
+    
     # if not is_reversed and split > 0:
     #     attacker_dirty = Metattack(modified_data, device=device)
     #     attacker_dirty.setup_surrogate(
@@ -313,17 +359,23 @@ def two_phase_attack_mcmc(
         u, v = second[0]
         try:
             if second[1]:
-                G.add_edge(u, v)
+                # G.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
             else:
-                G.remove_edge(u, v)
+                # G.remove_edge(u, v)
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]  
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-        modified_data = from_networkx(G).to(device)
-        modified_data.x = data.x
-        modified_data.y = data.y
-        modified_data.train_mask = data.train_mask
-        modified_data.test_mask = data.test_mask
+        # modified_data = from_networkx(G).to(device)
+        # modified_data.x = data.x
+        # modified_data.y = data.y
+        # modified_data.train_mask = data.train_mask
+        # modified_data.test_mask = data.test_mask
+
+        modified_data = copy.copy(G)
 
         modified_loss, modified_accuracy = train.test(modified_data)
 
@@ -575,10 +627,18 @@ def two_phase_attack_greedy(
     first_phase_edges = int(budget * split)
     second_phase_percent = ptb_rate * (1 - split) * 1 / 2
     accuracies, losses = [initial_accuracy], [initial_loss]
-    G = to_networkx(data, to_undirected=True)
-    G_dirty = to_networkx(data, to_undirected=True)
+    G = copy.copy(data)
+    G_dirty = copy.copy(data)
 
-    dirty_data = from_networkx(G_dirty).to(device)
+    # G = to_networkx(data, to_undirected=True)
+    # G_dirty = to_networkx(data, to_undirected=True)
+
+    # dirty_data = from_networkx(G_dirty).to(device)
+    # dirty_data.x = dirty_data_copy.x
+    # dirty_data.y = dirty_data_copy.y
+    # dirty_data.train_mask = dirty_data_copy.train_mask
+    # dirty_data.test_mask = dirty_data_copy.test_mask
+    dirty_data = G_dirty
     dirty_data.x = dirty_data_copy.x
     dirty_data.y = dirty_data_copy.y
     dirty_data.train_mask = dirty_data_copy.train_mask
@@ -606,17 +666,21 @@ def two_phase_attack_greedy(
         u, v = second[0]
         try:
             if second[1]:
-                G_dirty.add_edge(u, v)
+                # G_dirty.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                dirty_data.edge_index = torch.cat([dirty_data.edge_index, new_edges], dim=1)
             else:
-                G_dirty.remove_edge(u, v)
+                # G_dirty.remove_edge(u, v)
+                mask = ~(((dirty_data.edge_index[0] == u) & (dirty_data.edge_index[1] == v)) | ((dirty_data.edge_index[0] == v) & (dirty_data.edge_index[1] == u)))
+                dirty_data.edge_index = dirty_data.edge_index[:, mask]
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-    dirty_data = from_networkx(G_dirty).to(device)
-    dirty_data.x = dirty_data_copy.x
-    dirty_data.y = dirty_data_copy.y
-    dirty_data.train_mask = dirty_data_copy.train_mask
-    dirty_data.test_mask = dirty_data_copy.test_mask
+    # dirty_data = from_networkx(G_dirty).to(device)
+    # dirty_data.x = dirty_data_copy.x
+    # dirty_data.y = dirty_data_copy.y
+    # dirty_data.train_mask = dirty_data_copy.train_mask
+    # dirty_data.test_mask = dirty_data_copy.test_mask
 
     initial_dirty_loss, initial_dirty_accuracy = train.test(dirty_data)
 
@@ -631,11 +695,20 @@ def two_phase_attack_greedy(
             print(f"Attempt: {j}, Selected: {i}")
         u, v = random.choices(edges_to_add, weights=weights, k=1)[0]
 
-        matches = G.has_edge(u, v) == G_dirty.has_edge(u, v)
+        ## matches = G.has_edge(u, v) == G_dirty.has_edge(u, v)
+        G_has = (((G.edge_index[0] == u) & (G.edge_index[1] == v)) |
+          ((G.edge_index[0] == v) & (G.edge_index[1] == u))).any()
+        G_dirty_has = (((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) |
+          ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u))).any()
+
+        matches = G_has == G_dirty_has
+        
         if not matches:
             continue
 
-        hasEdge = G.has_edge(u, v)
+        # hasEdge = G.has_edge(u, v)
+        hasEdge = (((G.edge_index[0] == u) & (G.edge_index[1] == v)) |
+          ((G.edge_index[0] == v) & (G.edge_index[1] == u))).any()
 
         if (u, v) in degs_set:
             continue
@@ -643,17 +716,23 @@ def two_phase_attack_greedy(
         # clean
         try:
             if hasEdge:
-                G.remove_edge(u, v)
+                # G.remove_edge(u, v)
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]
             else:
-                G.add_edge(u, v)
+                # G.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-        modified_data = from_networkx(G).to(device)
-        modified_data.x = data.x
-        modified_data.y = data.y
-        modified_data.train_mask = data.train_mask
-        modified_data.test_mask = data.test_mask
+        # modified_data = from_networkx(G).to(device)
+        # modified_data.x = data.x
+        # modified_data.y = data.y
+        # modified_data.train_mask = data.train_mask
+        # modified_data.test_mask = data.test_mask
+
+        modified_data = copy.copy(G)
 
         modified_loss, modified_accuracy = train.test(modified_data)
         delta = modified_loss - initial_loss
@@ -661,18 +740,24 @@ def two_phase_attack_greedy(
         # dirty matrix
         try:
             if hasEdge:
-                G_dirty.remove_edge(u, v)
+                # G_dirty.remove_edge(u, v)
+                mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                G_dirty.edge_index = G_dirty.edge_index[:, mask]
             else:
-                G_dirty.add_edge(u, v)
+                # G_dirty.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-        dirty_data = from_networkx(G_dirty).to(device)
-        dirty_data.x = dirty_data_copy.x
-        dirty_data.y = dirty_data_copy.y
-        dirty_data.train_mask = dirty_data_copy.train_mask
-        dirty_data.test_mask = dirty_data_copy.test_mask
+        # dirty_data = from_networkx(G_dirty).to(device)
+        # dirty_data.x = dirty_data_copy.x
+        # dirty_data.y = dirty_data_copy.y
+        # dirty_data.train_mask = dirty_data_copy.train_mask
+        # dirty_data.test_mask = dirty_data_copy.test_mask
 
+        dirty_data = copy.copy(G_dirty)
+        
         dirty_loss, dirty_accuracy = train.test(dirty_data)
         dirty_delta = dirty_loss - dirty_prev_loss
         master_dirty = dirty_loss - initial_dirty_loss
@@ -695,21 +780,35 @@ def two_phase_attack_greedy(
             # print(i, 'miss!')
             try:
                 if hasEdge:
-                    G.add_edge(u, v)
-                    G_dirty.add_edge(u, v)
+                    # G.add_edge(u, v)
+                    # G_dirty.add_edge(u, v)
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+                    
+                    # G_dirty.add_edge(u, v)
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
                 else:
-                    G.remove_edge(u, v)
-                    G_dirty.remove_edge(u, v)
+                    # G.remove_edge(u, v)
+                    # G_dirty.remove_edge(u, v)
+                    mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                    G.edge_index = G.edge_index[:, mask]  
+                    
+                    # G_dirty.remove_edge(u, v)
+                    mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                    G_dirty.edge_index = G_dirty.edge_index[:, mask]
             except Exception as e:
                 print(f"Error modifying edge ({u}, {v}): {e}")
 
         j += 1
 
-    modified_data = from_networkx(G).to(device)
-    modified_data.x = data.x
-    modified_data.y = data.y
-    modified_data.train_mask = data.train_mask
-    modified_data.test_mask = data.test_mask
+    # modified_data = from_networkx(G).to(device)
+    # modified_data.x = data.x
+    # modified_data.y = data.y
+    # modified_data.train_mask = data.train_mask
+    # modified_data.test_mask = data.test_mask
+
+    modified_data = copy.copy(G)
 
     # if not is_reversed and split > 0:
     #     attacker_dirty = Metattack(modified_data, device=device)
@@ -755,22 +854,481 @@ def two_phase_attack_greedy(
         u, v = second[0]
         try:
             if second[1]:
-                G.add_edge(u, v)
+                # G.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
             else:
-                G.remove_edge(u, v)
+                # G.remove_edge(u, v)
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]  
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-        modified_data = from_networkx(G).to(device)
-        modified_data.x = data.x
-        modified_data.y = data.y
-        modified_data.train_mask = data.train_mask
-        modified_data.test_mask = data.test_mask
+        # modified_data = from_networkx(G).to(device)
+        # modified_data.x = data.x
+        # modified_data.y = data.y
+        # modified_data.train_mask = data.train_mask
+        # modified_data.test_mask = data.test_mask
 
+        modified_data = copy.copy(G)
+        
         modified_loss, modified_accuracy = train.test(modified_data)
 
         # accuracies.append(modified_accuracy)
         losses.append(modified_loss)
         accuracies.append(modified_accuracy)
+
+    return accuracies, losses, j / (first_phase_edges + 1)
+
+#######################################
+##### POISONING BEGINS HERE    ########
+#######################################
+def two_phase_attack_greedy_poisoning(
+    data,
+    train,
+    model,
+    split,
+    edges_to_add,
+    accept_fn,
+    device,
+    is_reversed=False,
+    seed=42,
+    verbose=False,
+):
+    global budget, ptb_rate
+    initial_loss, initial_accuracy = train.test(data)
+    dirty_data_copy = copy.copy(data)
+    random.seed(seed)
+    diff_threshold = abs(initial_loss / 200)
+    first_phase_edges = int(budget * split)
+    second_phase_percent = ptb_rate * (1 - split) * 1 / 2
+    accuracies, losses = [initial_accuracy], [initial_loss]
+    G = copy.copy(data)
+    G_dirty = copy.copy(data)
+
+    dirty_data = G_dirty
+    dirty_data.x = dirty_data_copy.x
+    dirty_data.y = dirty_data_copy.y
+    dirty_data.train_mask = dirty_data_copy.train_mask
+    dirty_data.test_mask = dirty_data_copy.test_mask
+
+    attacker_dirty = Metattack(dirty_data, device=device)
+    attacker_dirty.setup_surrogate(
+        model,
+        labeled_nodes=dirty_data_copy.train_mask,
+        unlabeled_nodes=dirty_data_copy.test_mask,
+        lambda_=0.0,
+    )
+    attacker_dirty.reset()
+    attacker_dirty.attack(second_phase_percent)
+
+    degs_dirty = defaultdict(tuple)
+
+    for k, v in attacker_dirty._added_edges.items():
+        degs_dirty[v] = (k, True)
+
+    for k, v in attacker_dirty._removed_edges.items():
+        degs_dirty[v] = (k, False)
+
+    for _, second in degs_dirty.items():
+        u, v = second[0]
+        try:
+            if second[1]:
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                dirty_data.edge_index = torch.cat([dirty_data.edge_index, new_edges], dim=1)
+            else:
+                mask = ~(((dirty_data.edge_index[0] == u) & (dirty_data.edge_index[1] == v)) | ((dirty_data.edge_index[0] == v) & (dirty_data.edge_index[1] == u)))
+                dirty_data.edge_index = dirty_data.edge_index[:, mask]
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+
+    initial_dirty_loss, initial_dirty_accuracy = train.test(dirty_data)
+
+    degs_set = set([v[0] for v in degs_dirty.values()])
+
+    weights = gen_weights(len(edges_to_add))
+    data_copy = copy.copy(data)
+    i, j = 0, 0  # i - number added, j - spot in list
+    dirty_prev_loss, prev_loss = initial_dirty_loss, initial_loss
+    while i < first_phase_edges:
+        if verbose and i % 10 == 0:
+            print(f"Attempt: {j}, Selected: {i}")
+        u, v = random.choices(edges_to_add, weights=weights, k=1)[0]
+
+        G_has = (((G.edge_index[0] == u) & (G.edge_index[1] == v)) |
+          ((G.edge_index[0] == v) & (G.edge_index[1] == u))).any()
+        G_dirty_has = (((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) |
+          ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u))).any()
+
+        matches = G_has == G_dirty_has
+        
+        if not matches:
+            continue
+
+        hasEdge = (((G.edge_index[0] == u) & (G.edge_index[1] == v)) |
+          ((G.edge_index[0] == v) & (G.edge_index[1] == u))).any()
+
+        if (u, v) in degs_set:
+            continue
+
+        # clean
+        try:
+            if hasEdge:
+                # G.remove_edge(u, v)
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]
+            else:
+                # G.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+            
+        modified_data = copy.copy(G)
+        
+        # modified_loss, modified_accuracy = train.test(modified_data)
+        # delta = modified_loss - initial_loss
+
+        # dirty matrix
+        try:
+            if hasEdge:
+                mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                G_dirty.edge_index = G_dirty.edge_index[:, mask]
+            else:
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+
+        dirty_data = copy.copy(G_dirty)
+        
+        # dirty_loss, dirty_accuracy = train.test(dirty_data)
+        # dirty_delta = dirty_loss - dirty_prev_loss
+        # master_dirty = dirty_loss - initial_dirty_loss
+
+        #### write here swap to use surrogate
+        model_clean = GCN(modified_data.x.shape[1], len(set(modified_data.y)), [16]).to(device)
+        model_dirty = GCN(dirty_data.x.shape[1], len(set(dirty_data.y)), [16]).to(device)
+
+        model_clean.reset_parameters()
+        train_clean = Trainable(model_clean)
+        train_clean.fit(modified_data, 200)
+
+        model_dirty.reset_parameters()
+        train_dirty = Trainable(model_dirty)
+        train_dirty.fit(dirty_data, 200)
+
+        clean_loss, clean_accuracy = train_clean.test(modified_data)
+        dirty_loss, dirty_accuracy = train_dirty.test(dirty_data)
+
+        delta = clean_loss - initial_loss
+        dirty_delta = dirty_loss - initial_dirty_loss
+        
+        if (
+            accept_fn(abs(delta), initial_loss, i, first_phase_edges)
+            and dirty_delta > 0
+        ):
+            i += 1
+
+            dirty_prev_loss = dirty_loss
+            losses.append(clean_loss)
+            accuracies.append(clean_accuracy)
+        else:
+            try:
+                if hasEdge:
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+                    
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
+                else:
+                    mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                    G.edge_index = G.edge_index[:, mask]  
+                    
+                    mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                    G_dirty.edge_index = G_dirty.edge_index[:, mask]
+            except Exception as e:
+                print(f"Error modifying edge ({u}, {v}): {e}")
+
+        j += 1
+
+    modified_data = copy.copy(G)
+    
+    attacker = Metattack(modified_data, device=device)
+    attacker.setup_surrogate(
+        model,
+        labeled_nodes=data.train_mask,
+        unlabeled_nodes=data.test_mask,
+        lambda_=0.0,
+    )
+    attacker.reset()
+    attacker.attack(second_phase_percent)
+
+    degs = defaultdict(tuple)
+
+    for k, v in attacker._added_edges.items():
+        degs[v] = (k, True)
+
+    for k, v in attacker._removed_edges.items():
+        degs[v] = (k, False)
+
+    for _, second in degs.items():
+        u, v = second[0]
+        try:
+            if second[1]:
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+            else:
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]  
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+            
+        modified_data = copy.copy(G)
+        
+        modified_loss, modified_accuracy = train.test(modified_data)
+
+        losses.append(modified_loss)
+        accuracies.append(modified_accuracy)
+
+    return accuracies, losses, j / (first_phase_edges + 1)
+
+def two_phase_attack_mcmc_poisoning(
+    data,
+    train,
+    model,
+    split,
+    edges_to_add,
+    rand_fn,
+    accept_fn,
+    device,
+    is_reversed=False,
+    seed=42,
+    verbose=False,
+):
+    global budget, ptb_rate
+    initial_loss, initial_accuracy = train.test(data)
+    random.seed(seed)
+    dirty_data_copy = copy.copy(data)
+    diff_threshold = abs(initial_loss / 200)
+    first_phase_edges = int(budget * split)
+    second_phase_percent = ptb_rate * (1 - split) * 1 / 2
+    accuracies, losses = [initial_accuracy], [initial_loss]
+    # G = to_networkx(data, to_undirected=True)
+    # G_dirty = to_networkx(data, to_undirected=True)
+    G = copy.copy(data)
+    G_dirty = copy.copy(data)
+
+    i, j = 0, 0  # i - number added, j - attempts
+
+    # run a metattack on 1 - split
+    # store those edges in a dirty matrix
+    # calculate loss + accuracy of dirty matrix
+
+    # dirty_data = from_networkx(G_dirty).to(device)
+    dirty_data = G_dirty
+    dirty_data.x = dirty_data_copy.x
+    dirty_data.y = dirty_data_copy.y
+    dirty_data.train_mask = dirty_data_copy.train_mask
+    dirty_data.test_mask = dirty_data_copy.test_mask
+
+    attacker_dirty = Metattack(dirty_data, device=device)
+    attacker_dirty.setup_surrogate(
+        model,
+        labeled_nodes=dirty_data_copy.train_mask,
+        unlabeled_nodes=dirty_data_copy.test_mask,
+        lambda_=0.0,
+    )
+    attacker_dirty.reset()
+    attacker_dirty.attack(second_phase_percent)
+
+    degs_dirty = defaultdict(tuple)
+
+    for k, v in attacker_dirty._added_edges.items():
+        degs_dirty[v] = (k, True)
+
+    for k, v in attacker_dirty._removed_edges.items():
+        degs_dirty[v] = (k, False)
+    
+    for _, second in degs_dirty.items():
+        u, v = second[0]
+        try:
+            if second[1]:
+                # G_dirty.add_edge(u, v)
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                dirty_data.edge_index = torch.cat([dirty_data.edge_index, new_edges], dim=1)
+            else:
+                # G_dirty.remove_edge(u, v)
+                mask = ~(((dirty_data.edge_index[0] == u) & (dirty_data.edge_index[1] == v)) | ((dirty_data.edge_index[0] == v) & (dirty_data.edge_index[1] == u)))
+                dirty_data.edge_index = dirty_data.edge_index[:, mask]
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+
+
+    initial_dirty_loss, initial_dirty_accuracy = train.test(dirty_data)
+
+    degs_set = set([v[0] for v in degs_dirty.values()])
+
+    # remove dirty edges from edges_to_ad
+    data_copy = copy.copy(data)
+    dirty_prev_loss, prev_loss = initial_dirty_loss, initial_loss
+    weights = gen_weights(len(edges_to_add))
+    while i < first_phase_edges:
+        if verbose and i % 10 == 0:
+            print(f"Attempt: {j}, Selected: {i}")
+        j += 1
+        u, v = random.choices(edges_to_add, weights=weights, k=1)[0]
+        if (u, v) in degs_set:
+            continue
+
+        hasEdge = (((G.edge_index[0] == u) & (G.edge_index[1] == v)) |
+          ((G.edge_index[0] == v) & (G.edge_index[1] == u))).any()
+
+        # clean matrix
+        try:
+            if hasEdge:
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]
+            else:
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+
+        modified_data = copy.copy(G)
+
+        # modified_loss, modified_accuracy = train.test(modified_data)
+        # delta = modified_loss - initial_loss
+
+        try:
+            if hasEdge:
+                mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                G_dirty.edge_index = G_dirty.edge_index[:, mask]
+            else:
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+
+        dirty_data = copy.copy(G_dirty)
+
+        # dirty_loss, dirty_accuracy = train.test(dirty_data)
+        # dirty_delta = dirty_loss - dirty_prev_loss
+        # master_dirty = dirty_loss - initial_dirty_loss
+        
+        #### right here swap to use surrogate
+        model_clean = GCN(modified_data.x.shape[1], len(set(modified_data.y)), [16]).to(device)
+        model_dirty = GCN(dirty_data.x.shape[1], len(set(dirty_data.y)), [16]).to(device)
+        
+        model_clean.reset_parameters()
+        train_clean = Trainable(model_clean)
+        train_clean.fit(modified_data, 200)
+
+        model_dirty.reset_parameters()
+        train_dirty = Trainable(model_dirty)
+        train_dirty.fit(dirty_data, 200)
+
+        clean_loss, clean_accuracy = train_clean.test(modified_data)
+        dirty_loss, dirty_accuracy = train_dirty.test(dirty_data)
+
+        delta = clean_loss - initial_loss
+        dirty_delta = dirty_loss - initial_dirty_loss
+
+        if verbose and i % 10 == 0:
+            print(
+                f"max_change: {initial_loss / 100}, master_clean_delta: {delta}, master_dirty_delta: {master_dirty}"
+            )
+        # modified_loss: {modified_loss}, initial_loss: {initial_loss}, dirty_delta: {dirty_delta}")
+        # consider something sublinear here
+        if accept_fn(delta, initial_loss, i, first_phase_edges) and dirty_delta > 0:
+            i += 1
+            dirty_prev_loss = dirty_loss
+            accuracies.append(clean_accuracy)
+            losses.append(clean_loss)
+        elif (
+            not accept_fn(delta, initial_loss, i, first_phase_edges)
+            or master_dirty < delta
+            or master_dirty < 0
+        ):
+            try:
+                if hasEdge:
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+                    
+                    new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                    G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
+                    
+                else:
+                    mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                    G.edge_index = G.edge_index[:, mask]  
+                    
+                    mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                    G_dirty.edge_index = G_dirty.edge_index[:, mask]
+                    
+            except Exception as e:
+                print(f"Error modifying edge ({u}, {v}): {e}")
+            continue
+        else:
+            rnd = random.random()
+            if rand_fn(rnd, i):
+                i += 1
+                dirty_prev_loss = dirty_loss
+                accuracies.append(clean_accuracy)
+                losses.append(clean_loss)
+            else:
+                try:
+                    if hasEdge:
+                        new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                        G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+                        
+                        new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                        G_dirty.edge_index = torch.cat([G_dirty.edge_index, new_edges], dim=1)
+                    else:
+                        mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                        G.edge_index = G.edge_index[:, mask]  
+                        
+                        mask = ~(((G_dirty.edge_index[0] == u) & (G_dirty.edge_index[1] == v)) | ((G_dirty.edge_index[0] == v) & (G_dirty.edge_index[1] == u)))
+                        G_dirty.edge_index = G_dirty.edge_index[:, mask]
+                except Exception as e:
+                    print(f"Error modifying edge ({u}, {v}): {e}")
+
+    modified_data = copy.copy(G)
+
+    attacker = Metattack(modified_data, device=device)
+    attacker.setup_surrogate(
+        model,
+        labeled_nodes=data.train_mask,
+        unlabeled_nodes=data.test_mask,
+        lambda_=0.0,
+    )
+    attacker.reset()
+    attacker.attack(second_phase_percent)
+
+    degs = defaultdict(tuple)
+
+    for k, v in attacker._added_edges.items():
+        degs[v] = (k, True)
+
+    for k, v in attacker._removed_edges.items():
+        degs[v] = (k, False)
+
+    for _, second in degs.items():
+        u, v = second[0]
+        try:
+            if second[1]:
+                new_edges = torch.tensor([[u, v], [v, u]], dtype=torch.long).to(device)
+                G.edge_index = torch.cat([G.edge_index, new_edges], dim=1)
+            else:
+                mask = ~(((G.edge_index[0] == u) & (G.edge_index[1] == v)) | ((G.edge_index[0] == v) & (G.edge_index[1] == u)))
+                G.edge_index = G.edge_index[:, mask]  
+        except Exception as e:
+            print(f"Error modifying edge ({u}, {v}): {e}")
+            
+        modified_data = copy.copy(G)
+
+        modified_loss, modified_accuracy = train.test(modified_data)
+
+        accuracies.append(modified_accuracy)
+        losses.append(modified_loss)
 
     return accuracies, losses, j / (first_phase_edges + 1)

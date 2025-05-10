@@ -18,20 +18,27 @@ class Trainable:
         self.optimizer.step()
         return loss.item()
 
-    def test(self, data):
+    def test(self, data, type='test'):
         self.model.eval()
+        
         with torch.no_grad():
+            node_mask = []
             output = self.model(data.x, data.edge_index)
-            val_loss = self.criterion(output[data.test_mask], data.y[data.test_mask]).item()
+            if type=='test':
+                node_mask = data.test_mask
+            elif type=='val':
+                node_mask = data.val_mask
+            
+            val_loss = self.criterion(output[node_mask], data.y[node_mask]).item()
             pred = output.argmax(dim=1)
-            correct = (pred[data.test_mask] == data.y[data.test_mask]).sum().item()
-            accuracy = correct / data.test_mask.sum().item()
+            correct = (pred[node_mask] == data.y[node_mask]).sum().item()
+            accuracy = correct / node_mask.sum().item()
         return val_loss, accuracy
 
     def fit(self, data, epochs=200, select_best=True):
         for epoch in range(0, epochs + 1):
             train_loss = self.train(data)
-            val_loss, val_accuracy = self.test(data)
+            val_loss, val_accuracy = self.test(data, type='val')
 
             if val_accuracy > self.best_val_acc:
                 self.best_val_acc = val_accuracy
