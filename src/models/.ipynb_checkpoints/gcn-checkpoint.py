@@ -12,7 +12,8 @@ from torch_geometric.nn import MessagePassing
 
 class GCNConv(MessagePassing):
     def __init__(self, in_channels, out_channels, self_loops=True):
-        super().__init__()
+        super().__init__(aggr='add')
+        #super().__init__()
         self.self_loops = self_loops
 
         self.lin = Linear(in_channels, out_channels, bias=False, weight_initializer='glorot')
@@ -41,6 +42,47 @@ class GCNConv(MessagePassing):
         out += self.bias
 
         return out
+    def message(self, x_j, norm):
+        return x_j if norm is None else norm.view(-1, 1) * x_j
+
+# class GCNConv3(MessagePassing):
+#     def __init__(self, in_channels, out_channels, self_loops=True):
+#         #super().__init__()
+#         super().__init__(aggr='add')  # Aggregation method is 'add'
+#         self.self_loops = self_loops
+#         self.lin = Linear(in_channels, out_channels, bias=False, weight_initializer='glorot')
+#         self.bias = nn.Parameter(torch.Tensor(out_channels))
+#         self.reset_parameters()
+
+#     def reset_parameters(self):
+#         self.lin.reset_parameters()
+#         zeros(self.bias)
+
+#     def forward(self, x, edge_index):
+#         # Linear transformation
+#         x = self.lin(x)
+
+#         # Add self-loops (if enabled)
+#         if self.self_loops:
+#             edge_index, _ = add_self_loops(edge_index, num_nodes=None)
+
+#         # Normalize adjacency
+#         row, col = edge_index
+#         deg = degree(col, x.size(0), dtype=x.dtype)
+#         deg_inv_sqrt = deg.pow(-0.5)
+#         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+#         norm = deg_inv_sqrt[row] * deg_inv_sqrt[col]
+
+#         # Propagate
+#         out = self.propagate(edge_index, x=x, norm=norm)
+
+#         # Add bias
+#         out += self.bias
+
+#         return out
+
+#     def message(self, x_j, norm):
+#         return x_j if norm is None else norm.view(-1, 1) * x_j
 
 class GCN(nn.Module):
     def __init__(self, in_channels, out_channels, hidden_dims = [16], dropout = 0.5):
