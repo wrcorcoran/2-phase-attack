@@ -942,7 +942,13 @@ def two_phase_attack_greedy_poisoning(
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
 
-    initial_dirty_loss, initial_dirty_accuracy = train.test(dirty_data)
+    model_dirty = GCN(dirty_data.x.shape[1], len(set(dirty_data.y)), [16]).to(device)
+        
+    model_dirty.reset_parameters()
+    train_dirty = Trainable(model_dirty)
+    train_dirty.fit(dirty_data, 200)
+
+    initial_dirty_loss, initial_dirty_accuracy = train_dirty.test(dirty_data)
 
     degs_set = set([v[0] for v in degs_dirty.values()])
 
@@ -1084,12 +1090,19 @@ def two_phase_attack_greedy_poisoning(
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
             
-        modified_data = copy.copy(G)
-        
-        modified_loss, modified_accuracy = train.test(modified_data)
+    modified_data = copy.copy(G)
 
-        losses.append(modified_loss)
-        accuracies.append(modified_accuracy)
+    # modified_loss, modified_accuracy = train.test(modified_data)
+    model_clean = GCN(modified_data.x.shape[1], len(set(modified_data.y)), [16]).to(device)
+        
+    model_clean.reset_parameters()
+    train_clean = Trainable(model_clean)
+    train_clean.fit(modified_data, 200)
+
+    clean_loss, clean_accuracy = train_clean.test(modified_data)
+
+    accuracies.extend([clean_accuracy] * len(degs))
+    losses.append([clean_loss] * len(degs))
 
     return accuracies, losses, j / (first_phase_edges + 1)
 
@@ -1165,7 +1178,13 @@ def two_phase_attack_mcmc_poisoning(
             print(f"Error modifying edge ({u}, {v}): {e}")
 
 
-    initial_dirty_loss, initial_dirty_accuracy = train.test(dirty_data)
+    model_dirty = GCN(dirty_data.x.shape[1], len(set(dirty_data.y)), [16]).to(device)
+        
+    model_dirty.reset_parameters()
+    train_dirty = Trainable(model_dirty)
+    train_dirty.fit(dirty_data, 200)
+
+    initial_dirty_loss, initial_dirty_accuracy = train_dirty.test(dirty_data)
 
     degs_set = set([v[0] for v in degs_dirty.values()])
 
@@ -1324,11 +1343,18 @@ def two_phase_attack_mcmc_poisoning(
         except Exception as e:
             print(f"Error modifying edge ({u}, {v}): {e}")
             
-        modified_data = copy.copy(G)
+    modified_data = copy.copy(G)
 
-        modified_loss, modified_accuracy = train.test(modified_data)
+    # modified_loss, modified_accuracy = train.test(modified_data)
+    model_clean = GCN(modified_data.x.shape[1], len(set(modified_data.y)), [16]).to(device)
+        
+    model_clean.reset_parameters()
+    train_clean = Trainable(model_clean)
+    train_clean.fit(modified_data, 200)
 
-        accuracies.append(modified_accuracy)
-        losses.append(modified_loss)
+    clean_loss, clean_accuracy = train_clean.test(modified_data)
+
+    accuracies.extend([clean_accuracy] * len(degs))
+    losses.append([clean_loss] * len(degs))
 
     return accuracies, losses, j / (first_phase_edges + 1)
