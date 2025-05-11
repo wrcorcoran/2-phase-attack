@@ -149,7 +149,7 @@ class MetaPGD(torch.nn.Module):
     
     def reset_parameters(self, seed=42):
         """Reinitializes model parameters and velocity terms for momentum updates."""
-        torch.manual_seed(seed)
+        #torch.manual_seed(seed)
         
         for w, wv in zip(self.weights, self.w_velocities):
             torch.nn.init.xavier_uniform_(w)  # Reinitialize weights
@@ -211,7 +211,7 @@ class MetaPGD(torch.nn.Module):
                 w - self.lr * v
                 for w, v in zip(self.weights, self.w_velocities)
             ]
-
+        loss = self.logit_margin_loss(out[self.unlabeled_nodes], self.y_self_train)
         return loss
 
     def dense_gcn_norm(self, adj, improved = False,
@@ -227,7 +227,7 @@ class MetaPGD(torch.nn.Module):
         adj = norm_src * adj * norm_dst
         return adj
 
-    def attack(self, num_budgets=0.05, *, structure_attack=True,
+    def attack(self, num_budgets=0.05, *, structure_attack=True, symmetric=True,
                feature_attack=False, disable=False, ll_cutoff=0.004,
                iterations=200, base_lr=0.001, xi=1e-5, grad_clip=1.0, sampling_tries=100):
     
@@ -248,25 +248,35 @@ class MetaPGD(torch.nn.Module):
         for itr in tqdm(range(iterations), desc='Running PGD Attack...', disable=disable):
             modified_adj = self.get_perturbed_adj(adj_changes)
             adj_norm = self.dense_gcn_norm(modified_adj)
-        
-            temp_loss = self.inner_train(adj_norm, self.feat)  # Train with the perturbed graph
-            self.loss_list.append(temp_loss)
 
-            adj_grad, _ = self.compute_gradients(adj_norm, self.feat)
+            # if symmetric:
+            #     adj_changes = self._sym(adj_changes)
+            
+            loss = self.inner_train(adj_norm, self.feat)  # Train with the perturbed graph
+            self.loss_list.append(loss)
+
+            adj_grad = torch.autograd.grad(loss, adj_changes)[0]
+            #adj_grad, _ = self.compute_gradients(adj_norm, self.feat)
         
+            # if grad_clip is not None:
+            #     grad_norm = adj_grad.norm()
+            #     if grad_norm > grad_clip:
+            #         adj_grad *= grad_clip / grad_norm
             if grad_clip is not None:
-                grad_norm = adj_grad.norm()
-                if grad_norm > grad_clip:
-                    adj_grad *= grad_clip / grad_norm
-        
+                grad_norm = adj_grad.square().sum()
+                if grad_norm > grad_clip*grad_clip:
+                    adj_grad *= grad_clip / grad_norm.sqrt()
+
+
+            
             lr = base_lr * self.num_budgets / math.sqrt(itr + 1)
             with torch.no_grad():
-                adj_changes -= lr * adj_grad  
-                adj_changes.clamp_(0, 1)  # Keep values in [0,1]
-
-    
+                adj_changes -= lr * adj_grad
+                if adj_changes.clamp(0, 1).sum() < self.num_budgets:  # Keep values in [0,1]
+                    adj_changes.clamp_(0, 1)  # Keep values in [0,1]
+                else:
                 # Projection Step (Ensure Budget Constraint)
-                if adj_changes.sum() > self.num_budgets:
+                # if adj_changes.sum() > self.num_budgets:
                     top = adj_changes.max().item()
                     bot = (adj_changes.min() - 1).clamp_min(0).item()
                     mu = (top + bot) / 2
@@ -294,8 +304,8 @@ class MetaPGD(torch.nn.Module):
             flip_sample = adj_changes.bernoulli()
             print(self.num_budgets, flip_sample.count_nonzero())
             if flip_sample.count_nonzero() <= self.num_budgets:
-                flip_sample = torch.triu(flip_sample, diagonal=1)  # Keep upper triangle
-                flip_sample = flip_sample + flip_sample.t()  # Mirror to lower triangle
+                # flip_sample = torch.triu(flip_sample, diagonal=1)  # Keep upper triangle
+                # flip_sample = flip_sample + flip_sample.t()  # Mirror to lower triangle
                 k += 1
                 if pbar:
                     pbar.update(1)
@@ -320,7 +330,7 @@ class MetaPGD(torch.nn.Module):
     
         A_pert = self.get_perturbed_adj(A_flip)
     
-        self.inner_train(A_pert, self.feat)
+        _ = self.inner_train(A_pert, self.feat)
     
         scores = self(A_pert, self.feat)
     
@@ -395,8 +405,9 @@ class MetaPGD(torch.nn.Module):
         score -= score.min()
         return score.view(-1)
 
-    def compute_gradients(self, modified_adj, modified_feat):
-        logit = self(modified_adj, modified_feat) / self.tau
+    # def compute_gradients(self, modified_adj, modified_feat):
+    def compute_gradients(self, loss):
+        #logit = self(modified_adj, modified_feat) / self.tau
     
         # Use Logit Margin Loss instead of Cross-Entropy
         # def logit_margin_loss(logits, y):
@@ -404,14 +415,22 @@ class MetaPGD(torch.nn.Module):
         #     top_wrong_logits = logits.topk(2, dim=1)[0][:, 1]  # 2nd highest logit
         #     return (true_class_logits - top_wrong_logits).mean()
     
-        loss = self.logit_margin_loss(logit[self.labeled_nodes], self.y_train)
+        #loss = self.logit_margin_loss(logit[self.labeled_nodes], self.y_train)
         #loss = self.logit_margin_loss(logit[self.unlabeled_nodes], self.y_self_train)
         #loss = F.cross_entropy(logit[self.unlabeled_nodes], self.y_self_train)
         
         #Only structure attack is required
         if self.structure_attack:
             return torch.autograd.grad(loss, self.adj_changes)[0], None
-
+    def _sym(self,triu):
+        """
+        Constructs a matrix whose values only depend on the upper triangle of "triu", and whose diagonal is
+        always zero. This way, each edge in the graph is only parameterized by one number and not two, and the
+        diagonal is not parameterized at all. Thereby, we avoid non-symmetric and diagonal adjustments of "triu".
+        """
+    
+        triu = triu.triu(diagonal=1)
+        return triu + triu.T
 
 # def handle_new_edges(data, attacker, device):
 #     added, removed = list(attacker._added_edges.keys()), list(attacker._removed_edges.keys())
